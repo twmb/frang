@@ -226,6 +226,8 @@ type testConsumer struct {
 	wg sync.WaitGroup
 	mu sync.Mutex
 
+	logsOnce sync.Once
+
 	// part2key tracks keys we have consumed from which partition
 	part2key map[int32][]int
 

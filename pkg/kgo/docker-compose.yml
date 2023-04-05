@@ -1,0 +1,137 @@
+version: '3.7'
+services:
+  redpanda-0:
+    privileged: true
+    network_mode: host
+    command:
+      - redpanda
+      - start
+      - --set redpanda.admin=[{"address":"0.0.0.0","port":9644}]
+      - --set redpanda.enable_idempotence=true
+      - --set redpanda.enable_transactions=true
+      - --set redpanda.auto_create_topics_enabled=true
+      - --smp=1
+      - --reserve-memory=0M
+      - --overprovisioned
+      - --node-id=0
+      - --check=false
+      - --schema-registry-addr=0.0.0.0:8072
+      - --pandaproxy-addr=0.0.0.0:8082
+      - --advertise-pandaproxy-addr=localhost:8082
+      - --kafka-addr=0.0.0.0:9092
+      - --advertise-kafka-addr=localhost:9092
+      - --rpc-addr=0.0.0.0:33145
+      - --advertise-rpc-addr=localhost:33145
+    image: vectorized/redpanda-nightly:latest
+
+  redpanda-1:
+    privileged: true
+    network_mode: host
+    depends_on:
+      - redpanda-0
+    command:
+      - redpanda
+      - start
+      - --set redpanda.admin=[{"address":"0.0.0.0","port":9645}]
+      - --set redpanda.enable_idempotence=true
+      - --set redpanda.enable_transactions=true
+      - --set redpanda.auto_create_topics_enabled=true
+      - --smp=1
+      - --reserve-memory=0M
+      - --overprovisioned
+      - --node-id=1
+      - --check=false
+      - --schema-registry-addr=0.0.0.0:8073
+      - --pandaproxy-addr=0.0.0.0:8083
+      - --advertise-pandaproxy-addr=localhost:8083
+      - --kafka-addr=0.0.0.0:9093
+      - --advertise-kafka-addr=localhost:9093
+      - --rpc-addr=0.0.0.0:33146
+      - --advertise-rpc-addr=localhost:33146
+      - --seeds="localhost:33145"
+    image: vectorized/redpanda-nightly:latest
+
+  redpanda-2:
+    privileged: true
+    network_mode: host
+    depends_on:
+      - redpanda-1
+    command:
+      - redpanda
+      - start
+      - --set redpanda.admin=[{"address":"0.0.0.0","port":9646}]
+      - --set redpanda.enable_idempotence=true
+      - --set redpanda.enable_transactions=true
+      - --set redpanda.auto_create_topics_enabled=true
+      - --smp=1
+      - --reserve-memory=0M
+      - --overprovisioned
+      - --node-id=2
+      - --check=false
+      - --schema-registry-addr=0.0.0.0:8074
+      - --pandaproxy-addr=0.0.0.0:8084
+      - --advertise-pandaproxy-addr=localhost:8084
+      - --kafka-addr=0.0.0.0:9094
+      - --advertise-kafka-addr=localhost:9094
+      - --rpc-addr=0.0.0.0:33147
+      - --advertise-rpc-addr=localhost:33147
+      - --seeds="localhost:33145"
+    image: vectorized/redpanda-nightly:latest
+
+    #  redpanda-3:
+    #    privileged: true
+    #    network_mode: host
+    #    depends_on:
+    #      - redpanda-2
+    #    command:
+    #      - redpanda
+    #      - start
+    #      - --set redpanda.admin=[{"address":"0.0.0.0","port":9647}]
+    #      - --set redpanda.enable_idempotence=true
+    #      - --set redpanda.enable_transactions=true
+    #      - --set redpanda.auto_create_topics_enabled=true
+    #      - --smp=1
+    #      - --reserve-memory=0M
+    #      - --overprovisioned
+    #      - --node-id=3
+    #      - --check=false
+    #      - --schema-registry-addr=0.0.0.0:8078
+    #      - --pandaproxy-addr=0.0.0.0:8088
+    #      - --advertise-pandaproxy-addr=localhost:8088
+    #      - --kafka-addr=0.0.0.0:9098
+    #      - --advertise-kafka-addr=localhost:9098
+    #      - --rpc-addr=0.0.0.0:33148
+    #      - --advertise-rpc-addr=localhost:33148
+    #      - --seeds="localhost:33145"
+    #    image: docker.vectorized.io/vectorized/redpanda:latest
+    #
+    #  redpanda-4:
+    #    privileged: true
+    #    network_mode: host
+    #    depends_on:
+    #      - redpanda-3
+    #    command:
+    #      - redpanda
+    #      - start
+    #      - --set redpanda.admin=[{"address":"0.0.0.0","port":9648}]
+    #      - --set redpanda.enable_idempotence=true
+    #      - --set redpanda.enable_transactions=true
+    #      - --set redpanda.auto_create_topics_enabled=true
+    #      - --smp=1
+    #      - --reserve-memory=0M
+    #      - --overprovisioned
+    #      - --node-id=4
+    #      - --check=false
+    #      - --schema-registry-addr=0.0.0.0:8079
+    #      - --pandaproxy-addr=0.0.0.0:8089
+    #      - --advertise-pandaproxy-addr=localhost:8089
+    #      - --kafka-addr=0.0.0.0:9099
+    #      - --advertise-kafka-addr=localhost:9099
+    #      - --rpc-addr=0.0.0.0:33149
+    #      - --advertise-rpc-addr=localhost:33149
+    #      - --seeds="localhost:33145"
+    #    image: docker.vectorized.io/vectorized/redpanda:latest
+    #
+    #
+    #  - --set redpanda.enable_sasl=true
+    #  - --set redpanda.superusers=["adminplain","User:adminplain"]

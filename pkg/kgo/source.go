@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"hash/crc32"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -610,6 +611,17 @@ func (s *source) fetch(consumerSession *consumerSession, doneFetch chan<- struct
 	if err != nil {
 		close(requested)
 	} else {
+
+		var sb strings.Builder
+		for t, ps := range req.usedOffsets {
+			fmt.Fprintf(&sb, "%s[", t)
+			for p, o := range ps {
+				fmt.Fprintf(&sb, "{p%d o%d}", p, o.offset)
+			}
+			fmt.Fprintf(&sb, "] ")
+		}
+		s.cl.cfg.logger.Log(LogLevelDebug, "issuing fetch", "tps", sb.String())
+
 		br.do(ctx, req, func(k kmsg.Response, e error) {
 			kresp, err = k, e
 			close(requested)

@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"sort"
 	"strconv"
 	"testing"
 	"time"
@@ -116,10 +117,11 @@ func (c *testConsumer) etl(etlsBeforeQuit int) {
 
 	netls := 0 // for if etlsBeforeQuit is non-negative
 
+	l := testLogger()
 	opts := []Opt{
 		getSeedBrokers(),
 		UnknownTopicRetries(-1), // see txn_test comment
-		WithLogger(testLogger()),
+		WithLogger(l),
 		ConsumerGroup(c.group),
 		ConsumeTopics(c.consumeFrom),
 		Balancers(c.balancer),
@@ -161,6 +163,56 @@ func (c *testConsumer) etl(etlsBeforeQuit int) {
 		}
 	}()
 
+	done := make(chan struct{})
+	go func() {
+		ticker := time.NewTicker(time.Minute)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-done:
+				return
+			case <-ticker.C:
+				l.Log(LogLevelDebug, "consumed so far", "n_records", c.consumed.Load())
+			}
+		}
+	}()
+
+	go func() {
+		timer := time.NewTimer(8 * time.Minute)
+		defer timer.Stop()
+		select {
+		case <-done:
+			return
+		case <-timer.C:
+			c.logsOnce.Do(func() {
+				c.mu.Lock()
+				defer c.mu.Unlock()
+
+				allKeys := make([]int, 0, testRecordLimit)
+				key2part := make(map[int]int32)
+				for part, keys := range c.part2key {
+					allKeys = append(allKeys, keys...)
+					for _, key := range keys {
+						key2part[key] = part
+					}
+				}
+
+				if len(allKeys) != testRecordLimit {
+					l.Log(LogLevelInfo, "MISSING RECORDS", "got", len(allKeys), "exp", testRecordLimit)
+				}
+				exp := 0
+				sort.Ints(allKeys)
+				for i := range allKeys {
+					if i != exp {
+						l.Log(LogLevelInfo, "MISSING KEY", "missing", exp, "exp_part", key2part[exp])
+					}
+					exp = i + 1
+				}
+				l.Log(LogLevelInfo, "PARANOIA ALL", "all_keys", allKeys, "key2part", key2part)
+			})
+		}
+	}()
+
 	defer cl.AllowRebalance()
 	for {
 		cl.AllowRebalance()
@@ -184,6 +236,9 @@ func (c *testConsumer) etl(etlsBeforeQuit int) {
 		cancel()
 		if err := fetches.Err(); err == context.DeadlineExceeded || err == context.Canceled || err == ErrClientClosed {
 			if consumed := int(c.consumed.Load()); consumed == testRecordLimit {
+				if etlsBeforeQuit > 0 {
+					l.Log(LogLevelDebug, "at the record limit with etlsBeforeQuit, which will be problematic", "etls", netls, "before_quit", etlsBeforeQuit)
+				}
 				return
 			} else if consumed > testRecordLimit {
 				panic(fmt.Sprintf("invalid: consumed too much from %s (group %s)", c.consumeFrom, c.group))
@@ -215,6 +270,7 @@ func (c *testConsumer) etl(etlsBeforeQuit int) {
 			c.mu.Lock()
 			// check dup
 			if _, exists := c.partOffsets[partOffset{r.Partition, r.Offset}]; exists {
+				l.Log(LogLevelError, "double offset", "t", r.Topic, "p", r.Partition, "o", r.Offset)
 				c.errCh <- fmt.Errorf("saw double offset t %s p%do%d", r.Topic, r.Partition, r.Offset)
 			}
 			c.partOffsets[partOffset{r.Partition, r.Offset}] = struct{}{}
