@@ -29,9 +29,10 @@ func (c *Cluster) handleFetch(creq clientReq, w *watchFetch) (kmsg.Response, err
 	}
 
 	var (
-		nbytes      int
-		returnEarly bool
-		needp       tps[int]
+		readCommitted = req.IsolationLevel == 1
+		nbytes        int
+		returnEarly   bool
+		needp         tps[int]
 	)
 	if w == nil {
 	out:
@@ -53,7 +54,7 @@ func (c *Cluster) handleFetch(creq clientReq, w *watchFetch) (kmsg.Response, err
 					returnEarly = true // NotLeaderForPartition
 					break out
 				}
-				i, ok, atEnd := pd.searchOffset(rp.FetchOffset)
+				i, ok, atEnd := pd.searchOffset(rp.FetchOffset, readCommitted)
 				if atEnd {
 					continue
 				}
@@ -63,6 +64,9 @@ func (c *Cluster) handleFetch(creq clientReq, w *watchFetch) (kmsg.Response, err
 				}
 				pbytes := 0
 				for _, b := range pd.batches[i:] {
+					if readCommitted && b.inTx {
+						break
+					}
 					nbytes += b.nbytes
 					pbytes += b.nbytes
 					if pbytes >= int(rp.PartitionMaxBytes) {
@@ -163,6 +167,9 @@ full:
 			}
 			var pbytes int
 			for _, b := range pd.batches[i:] {
+				if readCommitted && b.inTx {
+					break
+				}
 				if nbytes = nbytes + b.nbytes; nbytes > int(req.MaxBytes) && batchesAdded > 1 {
 					break full
 				}
@@ -181,6 +188,7 @@ full:
 type watchFetch struct {
 	need     int
 	needp    tps[int]
+	txwait   tps[int64]
 	deadline time.Time
 	creq     clientReq
 
@@ -192,16 +200,27 @@ type watchFetch struct {
 	cleaned bool
 }
 
-func (w *watchFetch) push(nbytes int) {
+func (w *watchFetch) push(t string, p int32, nbytes int) {
 	w.need -= nbytes
-	if w.need <= 0 {
-		w.once.Do(func() {
-			go w.cb()
-		})
+	needp, _ := w.needp.getp(t, p)
+	if needp != nil {
+		*needp -= nbytes
+	}
+	if *w.txwait.getpDefault(t, p) != 0 {
+		// If we are waiting for a commit, then new batches do not
+		// matter.
+		return
+	}
+	if w.need <= 0 || needp != nil && *needp <= 0 {
+		w.do()
 	}
 }
 
-func (w *watchFetch) deleted() {
+func (w *watchFetch) endTx() { w.do() }
+
+func (w *watchFetch) deleted() { w.do() }
+
+func (w *watchFetch) do() {
 	w.once.Do(func() {
 		go w.cb()
 	})

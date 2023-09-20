@@ -107,6 +107,7 @@ func NewCluster(opts ...Opt) (*Cluster, error) {
 	}
 	c.data.c = c
 	c.groups.c = c
+	c.pids.c = c
 	var err error
 	defer func() {
 		if err != nil {
@@ -235,6 +236,7 @@ func (b *broker) listen() {
 
 func (c *Cluster) run() {
 	for {
+		fmt.Println("wait loop")
 		var creq clientReq
 		var w *watchFetch
 
@@ -242,6 +244,7 @@ func (c *Cluster) run() {
 		case creq = <-c.reqCh:
 		case w = <-c.watchFetchCh:
 			if w.cleaned {
+				fmt.Println("watch fetch fire continue")
 				continue // already cleaned up, this is an extraneous timer fire
 			}
 			w.cleanup(c)
@@ -250,11 +253,13 @@ func (c *Cluster) run() {
 			return
 		case fn := <-c.adminCh:
 			// Run a custom request in the context of the cluster
+			fmt.Println("saw admin")
 			fn()
 			continue
 		}
 
 		kreq := creq.kreq
+		fmt.Println("saw", kmsg.Key(kreq.Key()).Name())
 		kresp, err, handled := c.tryControl(kreq, creq.cc.b)
 		if handled {
 			goto afterControl
@@ -305,9 +310,13 @@ func (c *Cluster) run() {
 		case kmsg.DeleteRecords:
 			kresp, err = c.handleDeleteRecords(creq.cc.b, kreq)
 		case kmsg.InitProducerID:
-			kresp, err = c.handleInitProducerID(kreq)
+			kresp, err = c.handleInitProducerID(creq.cc.b, kreq)
 		case kmsg.OffsetForLeaderEpoch:
 			kresp, err = c.handleOffsetForLeaderEpoch(creq.cc.b, kreq)
+		case kmsg.AddPartitionsToTxn:
+			kresp, err = c.handleAddPartitionsToTxn(creq.cc.b, kreq)
+		case kmsg.EndTxn:
+			kresp, err = c.handleEndTxn(creq.cc.b, kreq)
 		case kmsg.DescribeConfigs:
 			kresp, err = c.handleDescribeConfigs(creq.cc.b, kreq)
 		case kmsg.AlterConfigs:

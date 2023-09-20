@@ -2,6 +2,19 @@ package kfake
 
 type tps[V any] map[string]map[int32]*V
 
+func (tps *tps[V]) checkp(t string, p int32) bool {
+	_, ok := tps.getp(t, p)
+	return ok
+}
+
+func (tps *tps[V]) getpDefault(t string, p int32) *V {
+	v, ok := tps.getp(t, p)
+	if !ok {
+		return new(V)
+	}
+	return v
+}
+
 func (tps *tps[V]) getp(t string, p int32) (*V, bool) {
 	if *tps == nil {
 		return nil, false

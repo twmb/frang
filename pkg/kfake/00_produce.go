@@ -56,10 +56,6 @@ func (c *Cluster) handleProduce(b *broker, kreq kmsg.Request) (kmsg.Response, er
 		return resp
 	}
 
-	if req.TransactionID != nil {
-		donets(kerr.TransactionalIDAuthorizationFailed.Code)
-		return toresp(), nil
-	}
 	switch req.Acks {
 	case -1, 0, 1:
 	default:
@@ -116,26 +112,30 @@ func (c *Cluster) handleProduce(b *broker, kreq kmsg.Request) (kmsg.Response, er
 				b.MaxTimestamp = now
 				logAppendTime = now
 			}
-			if attrs&0xfff0 != 0 { // TODO txn bit
-				donep(rt.Topic, rp, kerr.CorruptMessage.Code)
-				continue
-			}
 			if b.LastOffsetDelta != b.NumRecords-1 {
 				donep(rt.Topic, rp, kerr.CorruptMessage.Code)
 				continue
 			}
 
-			seqs, epoch := c.pids.get(b.ProducerID, b.ProducerEpoch, rt.Topic, rp.Partition)
-			if be := b.ProducerEpoch; be != -1 {
-				if be < epoch {
-					donep(rt.Topic, rp, kerr.FencedLeaderEpoch.Code)
-					continue
-				} else if be > epoch {
-					donep(rt.Topic, rp, kerr.UnknownLeaderEpoch.Code)
-					continue
-				}
+			txnal := attrs&0xfff0 != 0
+			pid, seq := c.pids.get(b.ProducerID, b.ProducerEpoch, rt.Topic, rp.Partition)
+			if txnal && seq == nil {
+				donep(rt.Topic, rp, kerr.InvalidTxnState.Code)
+				continue
 			}
-			ok, dup := seqs.pushAndValidate(b.FirstSequence, b.NumRecords)
+			be := b.ProducerEpoch
+			switch {
+			case seq == nil && be != -1:
+				donep(rt.Topic, rp, kerr.InvalidTxnState.Code)
+				continue
+			case seq != nil && be < pid.epoch:
+				donep(rt.Topic, rp, kerr.FencedLeaderEpoch.Code)
+				continue
+			case seq != nil && be > pid.epoch:
+				donep(rt.Topic, rp, kerr.UnknownLeaderEpoch.Code)
+				continue
+			}
+			ok, dup := seq.pushAndValidate(b.FirstSequence, b.NumRecords)
 			if !ok {
 				donep(rt.Topic, rp, kerr.OutOfOrderSequenceNumber.Code)
 				continue
@@ -146,7 +146,10 @@ func (c *Cluster) handleProduce(b *broker, kreq kmsg.Request) (kmsg.Response, er
 			}
 			baseOffset := pd.highWatermark
 			lso := pd.logStartOffset
-			pd.pushBatch(len(rp.Records), b)
+			batchptr := pd.pushBatch(len(rp.Records), b, txnal)
+			if txnal {
+				pid.batches = append(pid.batches, batchptr)
+			}
 			sp := donep(rt.Topic, rp, 0)
 			sp.BaseOffset = baseOffset
 			sp.LogAppendTime = logAppendTime

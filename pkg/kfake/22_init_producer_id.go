@@ -6,13 +6,11 @@ import (
 )
 
 // TODO
-//
-// * Transactional IDs
 // * v3+
 
-func init() { regKey(22, 0, 4) }
+func init() { regKey(22, 0, 2) }
 
-func (c *Cluster) handleInitProducerID(kreq kmsg.Request) (kmsg.Response, error) {
+func (c *Cluster) handleInitProducerID(b *broker, kreq kmsg.Request) (kmsg.Response, error) {
 	var (
 		req  = kreq.(*kmsg.InitProducerIDRequest)
 		resp = req.ResponseKind().(*kmsg.InitProducerIDResponse)
@@ -23,12 +21,24 @@ func (c *Cluster) handleInitProducerID(kreq kmsg.Request) (kmsg.Response, error)
 	}
 
 	if req.TransactionalID != nil {
-		resp.ErrorCode = kerr.UnknownServerError.Code
-		return resp, nil
+		txid := *req.TransactionalID
+		if txid == "" {
+			resp.ErrorCode = kerr.InvalidRequest.Code
+			return resp, nil
+		}
+		coordinator := c.coordinator(txid)
+		if b != coordinator {
+			resp.ErrorCode = kerr.NotCoordinator.Code
+			return resp, nil
+		}
+		if req.TransactionTimeoutMillis < 0 { // TODO transaction.max.timeout.ms
+			resp.ErrorCode = kerr.InvalidTransactionTimeout.Code
+			return resp, nil
+		}
 	}
 
-	pid := c.pids.create(nil)
-	resp.ProducerID = pid.id
-	resp.ProducerEpoch = pid.epoch
+	id, epoch := c.pids.create(req.TransactionalID, req.TransactionTimeoutMillis)
+	resp.ProducerID = id
+	resp.ProducerEpoch = epoch
 	return resp, nil
 }

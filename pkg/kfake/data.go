@@ -33,6 +33,8 @@ type (
 
 	partData struct {
 		batches []partBatch
+		t       string
+		p       int32
 		dir     string
 
 		highWatermark    int64
@@ -47,6 +49,9 @@ type (
 		leader *broker
 
 		watch map[*watchFetch]struct{}
+
+		openPids      map[int64]int64 // pid => start offset
+		openPidStarts []int64         // offset
 
 		createdAt time.Time
 	}
@@ -66,6 +71,11 @@ type (
 		// When we drop the earlier timestamp, we update all following
 		// firstMaxTimestamps that match the dropped timestamp.
 		maxEarlierTimestamp int64
+
+		inTx bool
+
+		// Filled retroactively, if true, the pid aborted this batch.
+		aborted bool
 	}
 )
 
@@ -95,7 +105,8 @@ func (d *data) mkt(t string, nparts int, nreplicas int, configs map[string]*stri
 	d.treplicas[t] = nreplicas
 	d.tcfgs[t] = configs
 	for i := 0; i < nparts; i++ {
-		d.tps.mkp(t, int32(i), d.c.newPartData)
+		partition := int32(i)
+		d.tps.mkp(t, int32(i), func() *partData { return d.c.newPartData(t, partition) })
 	}
 }
 
@@ -106,8 +117,10 @@ func (c *Cluster) noLeader() *broker {
 	}
 }
 
-func (c *Cluster) newPartData() *partData {
+func (c *Cluster) newPartData(t string, p int32) *partData {
 	return &partData{
+		t:         t,
+		p:         p,
 		dir:       defLogDir,
 		leader:    c.bs[rand.Intn(len(c.bs))],
 		watch:     make(map[*watchFetch]struct{}),
@@ -115,7 +128,8 @@ func (c *Cluster) newPartData() *partData {
 	}
 }
 
-func (pd *partData) pushBatch(nbytes int, b kmsg.RecordBatch) {
+// Returns a pointer to the new batch.
+func (pd *partData) pushBatch(nbytes int, b kmsg.RecordBatch, inTx bool) *partBatch {
 	maxEarlierTimestamp := b.FirstTimestamp
 	if maxEarlierTimestamp < pd.maxTimestamp {
 		maxEarlierTimestamp = pd.maxTimestamp
@@ -124,16 +138,17 @@ func (pd *partData) pushBatch(nbytes int, b kmsg.RecordBatch) {
 	}
 	b.FirstOffset = pd.highWatermark
 	b.PartitionLeaderEpoch = pd.epoch
-	pd.batches = append(pd.batches, partBatch{b, nbytes, pd.epoch, maxEarlierTimestamp})
+	pd.batches = append(pd.batches, partBatch{b, nbytes, pd.epoch, maxEarlierTimestamp, inTx, false})
 	pd.highWatermark += int64(b.NumRecords)
 	pd.lastStableOffset += int64(b.NumRecords) // TODO
 	pd.nbytes += int64(nbytes)
 	for w := range pd.watch {
-		w.push(nbytes)
+		w.push(pd.t, pd.p, nbytes)
 	}
+	return &pd.batches[len(pd.batches)-1]
 }
 
-func (pd *partData) searchOffset(o int64) (index int, found bool, atEnd bool) {
+func (pd *partData) searchOffset(o int64, readCommitted bool) (index int, found bool, atEnd bool) {
 	if o < pd.logStartOffset || o > pd.highWatermark {
 		return 0, false, false
 	}
@@ -158,6 +173,9 @@ func (pd *partData) searchOffset(o int64) (index int, found bool, atEnd bool) {
 		}
 		return 0
 	})
+	if readCommitted && found && pd.batches[index].inTx {
+		return index, found, true
+	}
 	return index, found, false
 }
 
