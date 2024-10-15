@@ -24,7 +24,6 @@ linters:
     - asciicheck
     - bidichk
     - bodyclose
-    - copyloopvar
     - durationcheck
     - exhaustive
     - gocritic

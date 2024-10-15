@@ -41,6 +41,8 @@ func (p *pinReq) SetVersion(v int16) {
 	p.Request.SetVersion(v)
 }
 
+type forceOpenReq struct{ kmsg.Request }
+
 type promisedReq struct {
 	ctx     context.Context
 	req     kmsg.Request
@@ -406,6 +408,12 @@ start:
 		pr.promise(nil, pr.ctx.Err())
 		return
 	default:
+	}
+
+	if _, isForceOpen := req.(*forceOpenReq); isForceOpen {
+		cxn.lastWrite.Store(time.Now().UnixNano())
+		pr.promise(nil, nil)
+		return
 	}
 
 	// Produce requests (and only produce requests) can be written
