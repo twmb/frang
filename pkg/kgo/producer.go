@@ -553,7 +553,13 @@ start:
 	p.promisesMu.Lock()
 	for i, pr := range b.recs {
 		pr.LeaderEpoch = 0
-		pr.Offset = b.baseOffset + int64(i)
+		if b.baseOffset == -1 {
+			// if the base offset is invalid/unknown (-1), all record offsets should
+			// be treated as unknown
+			pr.Offset = -1
+		} else {
+			pr.Offset = b.baseOffset + int64(i)
+		}
 		pr.Partition = b.partition
 		pr.ProducerID = b.pid
 		pr.ProducerEpoch = b.epoch

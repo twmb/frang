@@ -1773,7 +1773,11 @@ func recordToRecord(
 		ProducerID:    batch.ProducerID,
 		ProducerEpoch: batch.ProducerEpoch,
 		LeaderEpoch:   batch.PartitionLeaderEpoch,
-		Offset:        batch.FirstOffset + int64(record.OffsetDelta),
+	}
+	if batch.FirstOffset == -1 {
+		r.Offset = -1
+	} else {
+		r.Offset = batch.FirstOffset + int64(record.OffsetDelta)
 	}
 	if r.Attrs.TimestampType() == 0 {
 		r.Timestamp = timeFromMillis(batch.FirstTimestamp + record.TimestampDelta64)
