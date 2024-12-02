@@ -5,6 +5,7 @@ import (
 	"compress/gzip"
 	"encoding/binary"
 	"errors"
+	pool "github.com/twmb/franz-go/pkg/kgo/internal"
 	"io"
 	"runtime"
 	"sync"
@@ -13,8 +14,6 @@ import (
 	"github.com/klauspost/compress/zstd"
 	"github.com/pierrec/lz4/v4"
 )
-
-var byteBuffers = sync.Pool{New: func() any { return bytes.NewBuffer(make([]byte, 8<<10)) }}
 
 type codecType int8
 
@@ -230,9 +229,10 @@ func (c *compressor) compress(dst *bytes.Buffer, src []byte, produceRequestVersi
 }
 
 type decompressor struct {
-	ungzPool   sync.Pool
-	unlz4Pool  sync.Pool
-	unzstdPool sync.Pool
+	ungzPool               sync.Pool
+	unlz4Pool              sync.Pool
+	unzstdPool             sync.Pool
+	bucketedByteBufferPool *pool.BucketedPool[byte]
 }
 
 func newDecompressor() *decompressor {
@@ -256,6 +256,7 @@ func newDecompressor() *decompressor {
 				return r
 			},
 		},
+		bucketedByteBufferPool: pool.NewBucketedPool[byte](1, 50<<20, 2, func(int) []byte { return make([]byte, 1<<10) }),
 	}
 	return d
 }
@@ -270,9 +271,16 @@ func (d *decompressor) decompress(src []byte, codec byte) ([]byte, error) {
 	if compCodec == codecNone {
 		return src, nil
 	}
-	out := byteBuffers.Get().(*bytes.Buffer)
-	out.Reset()
-	defer byteBuffers.Put(out)
+	out, buf, err := d.getDecodedBuffer(src, compCodec)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		if compCodec == codecSnappy {
+			return
+		}
+		d.bucketedByteBufferPool.Put(buf)
+	}()
 
 	switch compCodec {
 	case codecGzip:
@@ -284,7 +292,7 @@ func (d *decompressor) decompress(src []byte, codec byte) ([]byte, error) {
 		if _, err := io.Copy(out, ungz); err != nil {
 			return nil, err
 		}
-		return append([]byte(nil), out.Bytes()...), nil
+		return d.copyDecodedBuffer(out.Bytes(), compCodec), nil
 	case codecSnappy:
 		if len(src) > 16 && bytes.HasPrefix(src, xerialPfx) {
 			return xerialDecode(src)
@@ -293,7 +301,7 @@ func (d *decompressor) decompress(src []byte, codec byte) ([]byte, error) {
 		if err != nil {
 			return nil, err
 		}
-		return append([]byte(nil), decoded...), nil
+		return d.copyDecodedBuffer(decoded, compCodec), nil
 	case codecLZ4:
 		unlz4 := d.unlz4Pool.Get().(*lz4.Reader)
 		defer d.unlz4Pool.Put(unlz4)
@@ -301,7 +309,7 @@ func (d *decompressor) decompress(src []byte, codec byte) ([]byte, error) {
 		if _, err := io.Copy(out, unlz4); err != nil {
 			return nil, err
 		}
-		return append([]byte(nil), out.Bytes()...), nil
+		return d.copyDecodedBuffer(out.Bytes(), compCodec), nil
 	case codecZstd:
 		unzstd := d.unzstdPool.Get().(*zstdDecoder)
 		defer d.unzstdPool.Put(unzstd)
@@ -309,7 +317,7 @@ func (d *decompressor) decompress(src []byte, codec byte) ([]byte, error) {
 		if err != nil {
 			return nil, err
 		}
-		return append([]byte(nil), decoded...), nil
+		return d.copyDecodedBuffer(decoded, compCodec), nil
 	default:
 		return nil, errors.New("unknown compression codec")
 	}
@@ -343,4 +351,35 @@ func xerialDecode(src []byte) ([]byte, error) {
 		dst = append(dst, chunk...)
 	}
 	return dst, nil
+}
+
+func (d *decompressor) getDecodedBuffer(src []byte, compCodec codecType) (*bytes.Buffer, []byte, error) {
+	var (
+		decodedBufSize int
+		err            error
+	)
+	switch compCodec {
+	case codecSnappy:
+		decodedBufSize, err = s2.DecodedLen(src)
+		if err != nil {
+			return nil, nil, err
+		}
+
+	default:
+		// Make a guess at the output size.
+		decodedBufSize = len(src) * 2
+	}
+	buf := d.bucketedByteBufferPool.Get(decodedBufSize)[:0]
+
+	return bytes.NewBuffer(buf), buf, nil
+}
+
+func (d *decompressor) copyDecodedBuffer(decoded []byte, compCodec codecType) []byte {
+	if compCodec == codecSnappy {
+		// We already know the actual size of the decoded buffer before decompression,
+		// so there's no need to copy the buffer.
+		return decoded
+	}
+	out := d.bucketedByteBufferPool.Get(len(decoded))
+	return append(out[:0], decoded...)
 }

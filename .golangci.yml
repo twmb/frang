@@ -9,6 +9,9 @@ run:
 issues:
   exclude-use-default: false
   max-same-issues: 0 # print all failures
+  exclude-rules:
+    - path: pkg/kgo/internal/bucketed_pool.go
+      text: "SA6002: argument should be pointer-like to avoid allocations"
 
 linters:
   disable-all: true
