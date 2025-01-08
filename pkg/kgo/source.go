@@ -1389,6 +1389,19 @@ func (o *cursorOffsetNext) processRespPartition(br *broker, rp *kmsg.FetchRespon
 				h.OnFetchBatchRead(br.meta, o.from.topic, o.from.partition, m)
 			}
 		})
+
+		// If we encounter a decompression error BUT we have successfully decompressed
+		// one batch, it is likely that we have received a partial batch. Kafka returns
+		// UP TO the requested max partition bytes, sometimes truncating data at the end.
+		// It returns at least one valid batch, but everything after is copied as is
+		// (i.e. a quick slab copy). We set the error to nil and return what we have.
+		//
+		// If we have a decompression error immediately, we keep it and bubble it up.
+		// The client cannot progress, and the end user needs visibility.
+		if isDecompressErr(fp.Err) && len(fp.Records) > 0 {
+			fp.Err = nil
+			break
+		}
 	}
 
 	return fp
@@ -1476,6 +1489,7 @@ func (o *cursorOffsetNext) processRecordBatch(
 	if compression := byte(batch.Attributes & 0x0007); compression != 0 {
 		var err error
 		if rawRecords, err = decompressor.decompress(rawRecords, compression); err != nil {
+			fp.Err = &errDecompress{err}
 			return 0, 0 // truncated batch
 		}
 	}
@@ -1542,6 +1556,7 @@ func (o *cursorOffsetNext) processV1OuterMessage(
 
 	rawInner, err := decompressor.decompress(message.Value, compression)
 	if err != nil {
+		fp.Err = &errDecompress{err}
 		return 0, 0 // truncated batch
 	}
 
@@ -1653,6 +1668,7 @@ func (o *cursorOffsetNext) processV0OuterMessage(
 
 	rawInner, err := decompressor.decompress(message.Value, compression)
 	if err != nil {
+		fp.Err = &errDecompress{err}
 		return 0, 0 // truncated batch
 	}
 
