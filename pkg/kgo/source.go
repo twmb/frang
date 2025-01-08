@@ -489,8 +489,11 @@ func (s *source) discardBuffered() {
 // This returns the number of records taken and whether the source has been
 // completely drained.
 func (s *source) takeNBuffered(paused pausedTopics, n int) (Fetch, int, bool) {
-	var r Fetch
-	var taken int
+	var (
+		r      Fetch
+		rstrip Fetch
+		taken  int
+	)
 
 	b := &s.buffered
 	bf := &b.fetch
@@ -500,6 +503,7 @@ func (s *source) takeNBuffered(paused pausedTopics, n int) (Fetch, int, bool) {
 		// If the topic is outright paused, we allowUsable all
 		// partitions in the topic and skip the topic entirely.
 		if paused.has(t.Topic, -1) {
+			rstrip.Topics = append(rstrip.Topics, *t)
 			bf.Topics = bf.Topics[1:]
 			for _, pCursor := range b.usedOffsets[t.Topic] {
 				pCursor.from.allowUsable()
@@ -517,6 +521,15 @@ func (s *source) takeNBuffered(paused pausedTopics, n int) (Fetch, int, bool) {
 			rt = &r.Topics[len(r.Topics)-1]
 			rt.Partitions = nil
 		}
+		var rtstrip *FetchTopic
+		ensureTopicStripped := func() {
+			if rtstrip != nil {
+				return
+			}
+			rstrip.Topics = append(rstrip.Topics, *t)
+			rtstrip = &rstrip.Topics[len(rstrip.Topics)-1]
+			rtstrip.Partitions = nil
+		}
 
 		tCursors := b.usedOffsets[t.Topic]
 
@@ -524,6 +537,8 @@ func (s *source) takeNBuffered(paused pausedTopics, n int) (Fetch, int, bool) {
 			p := &t.Partitions[0]
 
 			if paused.has(t.Topic, p.Partition) {
+				ensureTopicStripped()
+				rtstrip.Partitions = append(rtstrip.Partitions, *p)
 				t.Partitions = t.Partitions[1:]
 				pCursor := tCursors[p.Partition]
 				pCursor.from.allowUsable()
@@ -577,6 +592,9 @@ func (s *source) takeNBuffered(paused pausedTopics, n int) (Fetch, int, bool) {
 		}
 	}
 
+	if len(rstrip.Topics) > 0 {
+		s.hook(&rstrip, false, true)
+	}
 	s.hook(&r, false, true) // unbuffered, polled
 
 	drained := len(bf.Topics) == 0

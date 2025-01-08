@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"reflect"
 	"sort"
+	"strconv"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -603,5 +605,81 @@ func TestIssue810(t *testing.T) {
 		if failed {
 			t.Errorf("did not see expected topics in time, last saw %v != exp %v", lastSaw, exp)
 		}
+	}
+}
+
+func TestIssue865(t *testing.T) {
+	t.Parallel()
+
+	t1, cleanup1 := tmpTopicPartitions(t, 1)
+	defer cleanup1()
+	t2, cleanup2 := tmpTopicPartitions(t, 1)
+	defer cleanup2()
+
+	cl, _ := newTestClient(
+		UnknownTopicRetries(-1),
+		ConsumeTopics(t1, t2),
+		FetchMaxWait(100*time.Millisecond),
+	)
+	defer cl.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	const (
+		nrecs      = 10_000
+		flushEvery = 1000
+		pollAmount = 100
+	)
+
+	var wg sync.WaitGroup
+	for i := 0; i < nrecs; i++ {
+		r1 := StringRecord(strconv.Itoa(i))
+		r1.Topic = t1
+		wg.Add(1)
+		cl.Produce(ctx, r1, func(_ *Record, err error) {
+			defer wg.Done()
+			if err != nil {
+				t.Fatal(err)
+			}
+		})
+
+		r2 := StringRecord(strconv.Itoa(i))
+		r2.Topic = t2
+		wg.Add(1)
+		cl.Produce(ctx, r2, func(_ *Record, err error) {
+			defer wg.Done()
+			if err != nil {
+				t.Fatal(err)
+			}
+		})
+
+		if nrecs%flushEvery == 0 {
+			cl.Flush(ctx)
+		}
+	}
+
+	wg.Wait()
+
+	for i := 2 * nrecs; i > 0; {
+		ctx, cancel := context.WithTimeout(ctx, 50*time.Millisecond)
+		fs := cl.PollRecords(ctx, 100)
+		cancel()
+		cl.ResumeFetchTopics(t2)
+		fs.EachRecord(func(r *Record) {
+			i--
+			if r.Topic == t2 {
+				cl.PauseFetchTopics(t2)
+			}
+		})
+	}
+
+	nrecbuf, nbytebuf := cl.BufferedFetchRecords(), cl.BufferedFetchBytes()
+
+	if nrecbuf != 0 {
+		t.Errorf("got rec buffered %d != 0", nrecbuf)
+	}
+	if nbytebuf != 0 {
+		t.Errorf("got byte buffered %d != 0", nbytebuf)
 	}
 }
