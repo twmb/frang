@@ -64,6 +64,7 @@ type Client struct {
 		pass string
 	}
 	bearerToken string
+	preReq      func(req *http.Request) error
 }
 
 // NewClient returns a new schema registry client.
@@ -143,6 +144,12 @@ start:
 		req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", cl.bearerToken))
 	}
 	cl.applyParams(ctx, req)
+
+	if cl.preReq != nil {
+		if err := cl.preReq(req); err != nil {
+			return fmt.Errorf("pre-request hook failed for %s %q: %w", method, reqURL, err)
+		}
+	}
 
 	resp, err := cl.httpcl.Do(req)
 	if err != nil {

@@ -85,6 +85,13 @@ func BearerToken(token string) ClientOpt {
 	}}
 }
 
+// PreReq sets a hook func to call before every request is sent.
+func PreReq(preReq func(req *http.Request) error) ClientOpt {
+	return clientOpt{func(cl *Client) {
+		cl.preReq = preReq
+	}}
+}
+
 // DefaultParams sets default parameters to apply to every request.
 func DefaultParams(ps ...Param) ClientOpt {
 	return clientOpt{func(cl *Client) {
