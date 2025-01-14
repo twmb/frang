@@ -96,9 +96,11 @@ func HandlerOpts(opts promhttp.HandlerOpts) Opt {
 	return opt{func(c *cfg) { c.handlerOpts = opts }}
 }
 
-// WithClientLabel adds a "cliend_id" label to all metrics.
+// WithClientLabel adds a "client_id" label to all metrics.
 func WithClientLabel() Opt {
-	return opt{func(c *cfg) { c.withClientLabel = true }}
+	return opt{func(c *cfg) {
+		c.withClientLabel = true
+	}}
 }
 
 // Subsystem sets the subsystem for the kprom metrics, overriding the default

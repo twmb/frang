@@ -37,6 +37,7 @@ package kprom
 import (
 	"net"
 	"net/http"
+	"slices"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -130,9 +131,19 @@ func (m *Metrics) OnNewClient(client *kgo.Client) {
 		subsystem   = m.cfg.subsystem
 		constLabels prometheus.Labels
 	)
+	dynamicLabels := []string{"node_id"}
 	if m.cfg.withClientLabel {
 		constLabels = make(prometheus.Labels)
 		constLabels["client_id"] = client.OptValue(kgo.ClientID).(string)
+		dynamicLabels = append(dynamicLabels, "client_id")
+		if !slices.Contains(m.cfg.fetchProduceOpts.labels, "client_id") {
+			m.cfg.fetchProduceOpts.labels = append(m.cfg.fetchProduceOpts.labels, "client_id")
+		}
+	}
+
+	// Skip metrics definitions if hook was already called
+	if m.connConnectsTotal != nil {
+		return
 	}
 
 	// returns Hist buckets if set, otherwise defBucket
@@ -172,103 +183,92 @@ func (m *Metrics) OnNewClient(client *kgo.Client) {
 	// Write
 
 	m.writeBytesTotal = factory.NewCounterVec(prometheus.CounterOpts{
-		Namespace:   namespace,
-		Subsystem:   subsystem,
-		ConstLabels: constLabels,
-		Name:        "write_bytes_total",
-		Help:        "Total number of bytes written to the TCP connection. The bytes count is tracked after compression (when used).",
-	}, []string{"node_id"})
+		Namespace: namespace,
+		Subsystem: subsystem,
+		Name:      "write_bytes_total",
+		Help:      "Total number of bytes written",
+	}, dynamicLabels)
 
 	m.writeErrorsTotal = factory.NewCounterVec(prometheus.CounterOpts{
-		Namespace:   namespace,
-		Subsystem:   subsystem,
-		ConstLabels: constLabels,
-		Name:        "write_errors_total",
-		Help:        "Total number of write errors",
-	}, []string{"node_id"})
+		Namespace: namespace,
+		Subsystem: subsystem,
+		Name:      "write_errors_total",
+		Help:      "Total number of write errors",
+	}, dynamicLabels)
 
 	m.writeWaitSeconds = factory.NewHistogramVec(prometheus.HistogramOpts{
-		Namespace:   namespace,
-		Subsystem:   subsystem,
-		ConstLabels: constLabels,
-		Name:        "write_wait_seconds",
-		Help:        "Time spent waiting to write to Kafka",
-		Buckets:     getHistogramBuckets(WriteWait),
-	}, []string{"node_id"})
+		Namespace: namespace,
+		Subsystem: subsystem,
+		Name:      "write_wait_seconds",
+		Help:      "Time spent waiting to write to Kafka",
+		Buckets:   getHistogramBuckets(WriteWait),
+	}, dynamicLabels)
 
 	m.writeTimeSeconds = factory.NewHistogramVec(prometheus.HistogramOpts{
-		Namespace:   namespace,
-		Subsystem:   subsystem,
-		ConstLabels: constLabels,
-		Name:        "write_time_seconds",
-		Help:        "Time spent writing to Kafka",
-		Buckets:     getHistogramBuckets(WriteTime),
-	}, []string{"node_id"})
+		Namespace: namespace,
+		Subsystem: subsystem,
+		Name:      "write_time_seconds",
+		Help:      "Time spent writing to Kafka",
+		Buckets:   getHistogramBuckets(WriteTime),
+	}, dynamicLabels)
 
 	// Read
 
 	m.readBytesTotal = factory.NewCounterVec(prometheus.CounterOpts{
-		Namespace:   namespace,
-		Subsystem:   subsystem,
-		ConstLabels: constLabels,
-		Name:        "read_bytes_total",
-		Help:        "Total number of bytes read from the TCP connection. The bytes count is tracked before uncompression (when used).",
-	}, []string{"node_id"})
+		Namespace: namespace,
+		Subsystem: subsystem,
+		Name:      "read_bytes_total",
+		Help:      "Total number of bytes read",
+	}, dynamicLabels)
 
 	m.readErrorsTotal = factory.NewCounterVec(prometheus.CounterOpts{
-		Namespace:   namespace,
-		Subsystem:   subsystem,
-		ConstLabels: constLabels,
-		Name:        "read_errors_total",
-		Help:        "Total number of read errors",
-	}, []string{"node_id"})
+		Namespace: namespace,
+		Subsystem: subsystem,
+		Name:      "read_errors_total",
+		Help:      "Total number of read errors",
+	}, dynamicLabels)
 
 	m.readWaitSeconds = factory.NewHistogramVec(prometheus.HistogramOpts{
-		Namespace:   namespace,
-		Subsystem:   subsystem,
-		ConstLabels: constLabels,
-		Name:        "read_wait_seconds",
-		Help:        "Time spent waiting to read from Kafka",
-		Buckets:     getHistogramBuckets(ReadWait),
-	}, []string{"node_id"})
+		Namespace: namespace,
+		Subsystem: subsystem,
+		Name:      "read_wait_seconds",
+		Help:      "Time spent waiting to read from Kafka",
+		Buckets:   getHistogramBuckets(ReadWait),
+	}, dynamicLabels)
 
 	m.readTimeSeconds = factory.NewHistogramVec(prometheus.HistogramOpts{
-		Namespace:   namespace,
-		Subsystem:   subsystem,
-		ConstLabels: constLabels,
-		Name:        "read_time_seconds",
-		Help:        "Time spent reading from Kafka",
-		Buckets:     getHistogramBuckets(ReadTime),
-	}, []string{"node_id"})
+		Namespace: namespace,
+		Subsystem: subsystem,
+		Name:      "read_time_seconds",
+		Help:      "Time spent reading from Kafka",
+		Buckets:   getHistogramBuckets(ReadTime),
+	}, dynamicLabels)
 
 	// Request E2E duration & Throttle
 
 	m.requestDurationE2ESeconds = factory.NewHistogramVec(prometheus.HistogramOpts{
-		Namespace:   namespace,
-		Subsystem:   subsystem,
-		ConstLabels: constLabels,
-		Name:        "request_duration_e2e_seconds",
-		Help:        "Time from the start of when a request is written to the end of when the response for that request was fully read",
-		Buckets:     getHistogramBuckets(RequestDurationE2E),
-	}, []string{"node_id"})
+		Namespace: namespace,
+		Subsystem: subsystem,
+		Name:      "request_duration_e2e_seconds",
+		Help:      "Time from the start of when a request is written to the end of when the response for that request was fully read",
+		Buckets:   getHistogramBuckets(RequestDurationE2E),
+	}, dynamicLabels)
 
 	m.requestThrottledSeconds = factory.NewHistogramVec(prometheus.HistogramOpts{
-		Namespace:   namespace,
-		Subsystem:   subsystem,
-		ConstLabels: constLabels,
-		Name:        "request_throttled_seconds",
-		Help:        "Time the request was throttled",
-		Buckets:     getHistogramBuckets(RequestThrottled),
-	}, []string{"node_id"})
+		Namespace: namespace,
+		Subsystem: subsystem,
+		Name:      "request_throttled_seconds",
+		Help:      "Time the request was throttled",
+		Buckets:   getHistogramBuckets(RequestThrottled),
+	}, dynamicLabels)
 
 	// Produce
 
 	m.produceCompressedBytes = factory.NewCounterVec(prometheus.CounterOpts{
-		Namespace:   namespace,
-		Subsystem:   subsystem,
-		ConstLabels: constLabels,
-		Name:        "produce_compressed_bytes_total",
-		Help:        "Total number of compressed bytes produced",
+		Namespace: namespace,
+		Subsystem: subsystem,
+		Name:      "produce_compressed_bytes_total",
+		Help:      "Total number of compressed bytes produced",
 	}, m.cfg.fetchProduceOpts.labels)
 
 	produceUncompressedBytesName := "produce_bytes_total"
@@ -276,37 +276,33 @@ func (m *Metrics) OnNewClient(client *kgo.Client) {
 		produceUncompressedBytesName = "produce_uncompressed_bytes_total"
 	}
 	m.produceUncompressedBytes = factory.NewCounterVec(prometheus.CounterOpts{
-		Namespace:   namespace,
-		Subsystem:   subsystem,
-		ConstLabels: constLabels,
-		Name:        produceUncompressedBytesName,
-		Help:        "Total number of uncompressed bytes produced",
+		Namespace: namespace,
+		Subsystem: subsystem,
+		Name:      produceUncompressedBytesName,
+		Help:      "Total number of uncompressed bytes produced",
 	}, m.cfg.fetchProduceOpts.labels)
 
 	m.produceBatchesTotal = factory.NewCounterVec(prometheus.CounterOpts{
-		Namespace:   namespace,
-		Subsystem:   subsystem,
-		ConstLabels: constLabels,
-		Name:        "produce_batches_total",
-		Help:        "Total number of batches produced",
+		Namespace: namespace,
+		Subsystem: subsystem,
+		Name:      "produce_batches_total",
+		Help:      "Total number of batches produced",
 	}, m.cfg.fetchProduceOpts.labels)
 
 	m.produceRecordsTotal = factory.NewCounterVec(prometheus.CounterOpts{
-		Namespace:   namespace,
-		Subsystem:   subsystem,
-		ConstLabels: constLabels,
-		Name:        "produce_records_total",
-		Help:        "Total number of records produced",
+		Namespace: namespace,
+		Subsystem: subsystem,
+		Name:      "produce_records_total",
+		Help:      "Total number of records produced",
 	}, m.cfg.fetchProduceOpts.labels)
 
 	// Fetch
 
 	m.fetchCompressedBytes = factory.NewCounterVec(prometheus.CounterOpts{
-		Namespace:   namespace,
-		Subsystem:   subsystem,
-		ConstLabels: constLabels,
-		Name:        "fetch_compressed_bytes_total",
-		Help:        "Total number of compressed bytes fetched",
+		Namespace: namespace,
+		Subsystem: subsystem,
+		Name:      "fetch_compressed_bytes_total",
+		Help:      "Total number of compressed bytes fetched",
 	}, m.cfg.fetchProduceOpts.labels)
 
 	fetchUncompressedBytesName := "fetch_bytes_total"
@@ -314,27 +310,24 @@ func (m *Metrics) OnNewClient(client *kgo.Client) {
 		fetchUncompressedBytesName = "fetch_uncompressed_bytes_total"
 	}
 	m.fetchUncompressedBytes = factory.NewCounterVec(prometheus.CounterOpts{
-		Namespace:   namespace,
-		Subsystem:   subsystem,
-		ConstLabels: constLabels,
-		Name:        fetchUncompressedBytesName,
-		Help:        "Total number of uncompressed bytes fetched",
+		Namespace: namespace,
+		Subsystem: subsystem,
+		Name:      fetchUncompressedBytesName,
+		Help:      "Total number of uncompressed bytes fetched",
 	}, m.cfg.fetchProduceOpts.labels)
 
 	m.fetchBatchesTotal = factory.NewCounterVec(prometheus.CounterOpts{
-		Namespace:   namespace,
-		Subsystem:   subsystem,
-		ConstLabels: constLabels,
-		Name:        "fetch_batches_total",
-		Help:        "Total number of batches fetched",
+		Namespace: namespace,
+		Subsystem: subsystem,
+		Name:      "fetch_batches_total",
+		Help:      "Total number of batches fetched",
 	}, m.cfg.fetchProduceOpts.labels)
 
 	m.fetchRecordsTotal = factory.NewCounterVec(prometheus.CounterOpts{
-		Namespace:   namespace,
-		Subsystem:   subsystem,
-		ConstLabels: constLabels,
-		Name:        "fetch_records_total",
-		Help:        "Total number of records fetched",
+		Namespace: namespace,
+		Subsystem: subsystem,
+		Name:      "fetch_records_total",
+		Help:      "Total number of records fetched",
 	}, m.cfg.fetchProduceOpts.labels)
 
 	// Buffers
@@ -423,7 +416,7 @@ func (m *Metrics) OnBrokerThrottle(meta kgo.BrokerMetadata, throttleInterval tim
 // metrics gathering.
 // This method is meant to be called by the hook system and not by the user
 func (m *Metrics) OnProduceBatchWritten(meta kgo.BrokerMetadata, topic string, _ int32, metrics kgo.ProduceBatchMetrics) {
-	labels := m.fetchProducerLabels(kgo.NodeName(meta.NodeID), topic)
+	labels := m.fetchProducerLabels(kgo.NodeName(meta.NodeID), topic, metrics.ClientID)
 	if m.cfg.fetchProduceOpts.uncompressedBytes {
 		m.produceUncompressedBytes.With(labels).Add(float64(metrics.UncompressedBytes))
 	}
@@ -442,7 +435,7 @@ func (m *Metrics) OnProduceBatchWritten(meta kgo.BrokerMetadata, topic string, _
 // gathering.
 // This method is meant to be called by the hook system and not by the user
 func (m *Metrics) OnFetchBatchRead(meta kgo.BrokerMetadata, topic string, _ int32, metrics kgo.FetchBatchMetrics) {
-	labels := m.fetchProducerLabels(kgo.NodeName(meta.NodeID), topic)
+	labels := m.fetchProducerLabels(kgo.NodeName(meta.NodeID), topic, metrics.ClientID)
 	if m.cfg.fetchProduceOpts.uncompressedBytes {
 		m.fetchUncompressedBytes.With(labels).Add(float64(metrics.UncompressedBytes))
 	}
@@ -469,41 +462,47 @@ func (m *Metrics) OnBrokerWrite(meta kgo.BrokerMetadata, _ int16, bytesWritten i
 // This method is meant to be called by the hook system and not by the user
 func (m *Metrics) OnBrokerE2E(meta kgo.BrokerMetadata, _ int16, e2e kgo.BrokerE2E) {
 	nodeId := kgo.NodeName(meta.NodeID)
+	labelVals := []string{nodeId}
+	if m.cfg.withClientLabel {
+		labelVals = append(labelVals, e2e.ClientID)
+	}
 	if e2e.WriteErr != nil {
-		m.writeErrorsTotal.WithLabelValues(nodeId).Inc()
+		m.writeErrorsTotal.WithLabelValues(labelVals...).Inc()
 		return
 	}
-	m.writeBytesTotal.WithLabelValues(nodeId).Add(float64(e2e.BytesWritten))
+	m.writeBytesTotal.WithLabelValues(labelVals...).Add(float64(e2e.BytesWritten))
 	if _, ok := m.cfg.histograms[WriteWait]; ok {
-		m.writeWaitSeconds.WithLabelValues(nodeId).Observe(e2e.WriteWait.Seconds())
+		m.writeWaitSeconds.WithLabelValues(labelVals...).Observe(e2e.WriteWait.Seconds())
 	}
 	if _, ok := m.cfg.histograms[WriteTime]; ok {
-		m.writeTimeSeconds.WithLabelValues(nodeId).Observe(e2e.TimeToWrite.Seconds())
+		m.writeTimeSeconds.WithLabelValues(labelVals...).Observe(e2e.TimeToWrite.Seconds())
 	}
 	if e2e.ReadErr != nil {
-		m.readErrorsTotal.WithLabelValues(nodeId).Inc()
+		m.readErrorsTotal.WithLabelValues(labelVals...).Inc()
 		return
 	}
-	m.readBytesTotal.WithLabelValues(nodeId).Add(float64(e2e.BytesRead))
+	m.readBytesTotal.WithLabelValues(labelVals...).Add(float64(e2e.BytesRead))
 	if _, ok := m.cfg.histograms[ReadWait]; ok {
-		m.readWaitSeconds.WithLabelValues(nodeId).Observe(e2e.ReadWait.Seconds())
+		m.readWaitSeconds.WithLabelValues(labelVals...).Observe(e2e.ReadWait.Seconds())
 	}
 	if _, ok := m.cfg.histograms[ReadTime]; ok {
-		m.readTimeSeconds.WithLabelValues(nodeId).Observe(e2e.TimeToRead.Seconds())
+		m.readTimeSeconds.WithLabelValues(labelVals...).Observe(e2e.TimeToRead.Seconds())
 	}
 	if _, ok := m.cfg.histograms[RequestDurationE2E]; ok {
-		m.requestDurationE2ESeconds.WithLabelValues(nodeId).Observe(e2e.DurationE2E().Seconds())
+		m.requestDurationE2ESeconds.WithLabelValues(labelVals...).Observe(e2e.DurationE2E().Seconds())
 	}
 }
 
-func (m *Metrics) fetchProducerLabels(nodeId, topic string) prometheus.Labels {
-	labels := make(prometheus.Labels, 2)
+func (m *Metrics) fetchProducerLabels(nodeId, topic, clientID string) prometheus.Labels {
+	labels := make(prometheus.Labels, 3)
 	for _, l := range m.cfg.fetchProduceOpts.labels {
 		switch l {
 		case "topic":
 			labels[l] = topic
 		case "node_id":
 			labels[l] = nodeId
+		case "client_id":
+			labels[l] = clientID
 		}
 	}
 	return labels

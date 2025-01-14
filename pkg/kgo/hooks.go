@@ -134,6 +134,9 @@ type BrokerE2E struct {
 	WriteErr error
 	// ReadErr is any error encountered during reading.
 	ReadErr error
+
+	// ClientID is the ID of the client that made the request
+	ClientID string
 }
 
 // DurationE2E returns the e2e time from the start of when a request is written
@@ -239,6 +242,9 @@ type ProduceBatchMetrics struct {
 	// 0 is no compression, 1 is gzip, 2 is snappy, 3 is lz4, and 4 is
 	// zstd.
 	CompressionType uint8
+
+	// ClientID is the ID of the client that made the request
+	ClientID string
 }
 
 // HookProduceBatchWritten is called whenever a batch is known to be
@@ -288,6 +294,9 @@ type FetchBatchMetrics struct {
 	// 0 is no compression, 1 is gzip, 2 is snappy, 3 is lz4, and 4 is
 	// zstd.
 	CompressionType uint8
+
+	// ClientID is the ID of the client that made the request
+	ClientID string
 }
 
 // HookFetchBatchRead is called whenever a batch if read within the client.
@@ -417,4 +426,12 @@ func implementsAnyHook(h Hook) bool {
 		return true
 	}
 	return false
+}
+
+func (cl *Client) clientIDString() string {
+	resolved := "kgo"
+	if cl.cfg.id != nil {
+		resolved = *cl.cfg.id
+	}
+	return resolved
 }

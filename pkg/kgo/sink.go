@@ -1776,6 +1776,7 @@ func (p produceMetrics) hook(cfg *cfg, br *broker) {
 		for _, h := range hooks {
 			for topic, partitions := range p {
 				for partition, metrics := range partitions {
+					metrics.ClientID = br.cl.clientIDString()
 					h.OnProduceBatchWritten(br.meta, topic, partition, metrics)
 				}
 			}

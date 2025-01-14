@@ -477,6 +477,7 @@ func (cxn *brokerCxn) hookWriteE2E(key int16, bytesWritten int, writeWait, timeT
 				WriteWait:    writeWait,
 				TimeToWrite:  timeToWrite,
 				WriteErr:     writeErr,
+				ClientID:     cxn.cl.clientIDString(),
 			})
 		}
 	})
@@ -1232,6 +1233,7 @@ func (cxn *brokerCxn) readResponse(
 				ReadWait:     readWait,
 				TimeToRead:   timeToRead,
 				ReadErr:      readErr,
+				ClientID:     cxn.cl.clientIDString(),
 			})
 		}
 	})
